@@ -18,11 +18,123 @@ import streamlit.components.v1 as components
 # Page configuration
 # =========================
 st.set_page_config(
-    page_title="H. pylori Genetic Variation-Driven Gastric Cancer Risk Prediction: A SHAP-Explained Online Platform",
+    page_title="H. pylori Genetic Variation-Driven Gastric Cancer Risk Prediction",
     layout="wide"
 )
 
-st.title("H. pylori Genetic Variation-Driven Gastric Cancer Risk Prediction: A SHAP-Explained Online Platform")
+
+# =========================
+# Custom CSS
+# =========================
+st.markdown(
+    """
+    <style>
+    .block-container {
+        max-width: 1280px;
+        padding-top: 2.2rem;
+        padding-bottom: 3rem;
+    }
+
+    .main-title {
+        font-size: 2.25rem;
+        font-weight: 800;
+        line-height: 1.25;
+        color: #2f3340;
+        margin-bottom: 0.4rem;
+    }
+
+    .subtitle {
+        font-size: 1.0rem;
+        color: #666b7a;
+        margin-bottom: 1.5rem;
+    }
+
+    div[data-testid="stForm"] {
+        border: 1px solid #d9dce3;
+        border-radius: 14px;
+        padding: 24px 26px 20px 26px;
+        background-color: #ffffff;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+
+    div[data-testid="stSelectbox"] label {
+        font-size: 0.92rem;
+        font-weight: 650;
+        color: #252936;
+    }
+
+    div[data-testid="stSelectbox"] {
+        margin-bottom: 0.35rem;
+    }
+
+    div[data-testid="stFormSubmitButton"] button {
+        border-radius: 8px;
+        height: 2.8rem;
+        font-weight: 650;
+    }
+
+    .result-card {
+        border: 1px solid #d9dce3;
+        border-radius: 14px;
+        padding: 22px 26px;
+        margin-top: 1.4rem;
+        background-color: #ffffff;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+
+    .result-title {
+        font-size: 1.25rem;
+        font-weight: 750;
+        color: #2f3340;
+        margin-bottom: 0.6rem;
+    }
+
+    .result-line {
+        font-size: 1.15rem;
+        font-weight: 650;
+        color: #222633;
+        margin: 0.35rem 0;
+    }
+
+    .shap-card {
+        border: 1px solid #d9dce3;
+        border-radius: 14px;
+        padding: 20px 22px;
+        margin-top: 1.2rem;
+        background-color: #ffffff;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+
+    .section-title {
+        font-size: 1.25rem;
+        font-weight: 750;
+        color: #2f3340;
+        margin-bottom: 1rem;
+    }
+
+    .small-note {
+        font-size: 0.9rem;
+        color: #6b7280;
+        margin-top: 0.5rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+st.markdown(
+    """
+    <div class="main-title">
+        H. pylori Genetic Variation-Driven Gastric Cancer Risk Prediction:
+        A SHAP-Explained Online Platform
+    </div>
+    <div class="subtitle">
+        Select the absence or presence status of each genetic variation, then click Predict to obtain model-based risk estimation and SHAP explanation.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # =========================
@@ -42,19 +154,21 @@ OPTION_MAP = {
 @st.cache_resource
 def load_model():
     """
-    Load GBDT.pkl normally.
+    Load GBDT.pkl.
     If model deserialization raises No module named '_loss',
-    automatically apply the sklearn._loss._loss compatibility mapping.
+    automatically apply sklearn._loss._loss compatibility mapping.
     """
+    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "GBDT.pkl")
+
     try:
-        model = joblib.load("GBDT.pkl")
+        model = joblib.load(model_path)
         return model
 
     except ModuleNotFoundError as e:
         if str(e) == "No module named '_loss'" or getattr(e, "name", None) == "_loss":
             import sklearn._loss._loss as cy_loss
             sys.modules["_loss"] = cy_loss
-            model = joblib.load("GBDT.pkl")
+            model = joblib.load(model_path)
             return model
         else:
             raise e
@@ -68,39 +182,42 @@ def load_explainer(_model):
 try:
     clf = load_model()
 except Exception as e:
-    st.error("Model loading failed. Please check whether GBDT.pkl is in the same directory as app.py and whether the scikit-learn version is compatible.")
+    st.error(
+        "Model loading failed. Please check whether GBDT.pkl is in the same directory as app.py "
+        "and whether the scikit-learn version is compatible."
+    )
     st.exception(e)
     st.stop()
 
 
 # =========================
-# Get feature names
+# Get and clean feature names
 # =========================
 if not hasattr(clf, "feature_names_in_"):
-    st.error("The current model does not have the feature_names_in_ attribute, so input fields cannot be generated automatically.")
+    st.error(
+        "The current model does not have the feature_names_in_ attribute, "
+        "so input fields cannot be generated automatically."
+    )
     st.stop()
 
-# The model may contain hidden leading/trailing spaces in feature names.
-# Keep the original model feature names for prediction, and use stripped names for display.
-feature_names_model = [str(x) for x in clf.feature_names_in_]
-feature_names_display = [x.strip() for x in feature_names_model]
+# Model original feature names may contain hidden spaces.
+model_feature_names = [str(x) for x in clf.feature_names_in_]
+clean_feature_names = [x.strip() for x in model_feature_names]
 
-if len(feature_names_display) != len(set(feature_names_display)):
-    st.error("After removing leading/trailing spaces, duplicated feature names were detected. Please check the model feature names.")
+if len(clean_feature_names) != len(set(clean_feature_names)):
+    duplicated = pd.Series(clean_feature_names)[pd.Series(clean_feature_names).duplicated()].unique().tolist()
+    st.error(
+        "After stripping hidden spaces, duplicated feature names were detected: "
+        + ", ".join(duplicated)
+    )
     st.stop()
 
-# display name -> original model name; this preserves hidden spaces when calling clf.predict(X)
-display_to_model = dict(zip(feature_names_display, feature_names_model))
-# display name -> index used by Streamlit session_state keys
-display_to_index = {name: i for i, name in enumerate(feature_names_display)}
-
-if len(feature_names_display) != 23:
-    st.warning(f"The current model has {len(feature_names_display)} features, not 23. Please confirm that the correct model is loaded.")
+# Clean name -> original model name
+feature_to_model_name = dict(zip(clean_feature_names, model_feature_names))
 
 
 # =========================
-# Feature display order
-# Ordered according to the SHAP beeswarm plot, from high to low importance
+# SHAP-based display order
 # =========================
 display_order = [
     "omp32 T337H",
@@ -128,250 +245,325 @@ display_order = [
     "cagT"
 ]
 
-# Validate after stripping hidden spaces
-missing_features = set(feature_names_display) - set(display_order)
-extra_features = set(display_order) - set(feature_names_display)
 
-if missing_features:
-    st.error(f"显示顺序列表中缺少以下特征：{', '.join(sorted(missing_features))}")
-    with st.expander("Debug: model feature names"):
-        st.write(feature_names_model)
+# =========================
+# Validate display order
+# =========================
+missing_in_model = [x for x in display_order if x not in feature_to_model_name]
+extra_in_model = [x for x in clean_feature_names if x not in display_order]
+
+if missing_in_model:
+    st.error(
+        "The following features in display_order were not found in the model: "
+        + ", ".join(missing_in_model)
+    )
     st.stop()
 
-if extra_features:
-    st.error(f"显示顺序列表中包含模型没有的特征：{', '.join(sorted(extra_features))}")
-    with st.expander("Debug: model feature names"):
-        st.write(feature_names_model)
+if extra_in_model:
+    st.error(
+        "The model contains extra features not included in display_order: "
+        + ", ".join(extra_in_model)
+    )
     st.stop()
+
+if len(display_order) != 23:
+    st.warning(
+        f"The display_order currently contains {len(display_order)} features, not 23. "
+        "Please confirm whether this is expected."
+    )
 
 
 # =========================
 # Initialize input state
 # =========================
 def init_input_state():
-    """
-    Initialize the dropdown state for each variable.
-    The default value is absence for all variables.
-    """
-    for i, name in enumerate(feature_names_display):
-        key = f"input_{i}"
-
+    for name in display_order:
+        key = f"input_{name}"
         if key not in st.session_state:
             st.session_state[key] = "absence"
-
-        # Prevent old number_input states such as 0.0 / 1.0 from causing selectbox errors
         if st.session_state[key] not in OPTION_LIST:
             st.session_state[key] = "absence"
 
 
 def reset_inputs():
-    """
-    Reset all inputs to absence.
-    """
-    for i, name in enumerate(feature_names_display):
-        st.session_state[f"input_{i}"] = "absence"
+    for name in display_order:
+        st.session_state[f"input_{name}"] = "absence"
 
 
 init_input_state()
 
 
 # =========================
-# Layout
-# Left: all 23 feature inputs, ordered by SHAP importance
-# Right: prediction results and SHAP force plot
+# Input form: two-column layout
 # =========================
-left_col, right_col = st.columns([1, 1.5])
+with st.form("genetic_variation_form", clear_on_submit=False):
 
-with left_col:
-    st.subheader("Genetic Variation Input")
+    st.markdown('<div class="section-title">Genetic Variation Input</div>', unsafe_allow_html=True)
 
-    for name in display_order:
-        original_index = display_to_index[name]
-        st.selectbox(
-            label=name,
-            options=OPTION_LIST,
-            key=f"input_{original_index}"
-        )
+    # Two-column row-wise layout:
+    # row 1: feature 1 + feature 2
+    # row 2: feature 3 + feature 4
+    # ...
+    for i in range(0, len(display_order), 2):
+        col1, col2 = st.columns(2, gap="large")
+
+        with col1:
+            name = display_order[i]
+            st.selectbox(
+                label=name,
+                options=OPTION_LIST,
+                key=f"input_{name}"
+            )
+
+        with col2:
+            if i + 1 < len(display_order):
+                name = display_order[i + 1]
+                st.selectbox(
+                    label=name,
+                    options=OPTION_LIST,
+                    key=f"input_{name}"
+                )
+            else:
+                st.empty()
 
     st.markdown("---")
 
-    predict_btn = st.button(
-        "Predict",
-        type="primary",
-        use_container_width=True
+    btn_col1, btn_col2, btn_col3 = st.columns([1.2, 1.2, 6])
+
+    with btn_col1:
+        predict_btn = st.form_submit_button(
+            "Predict",
+            type="primary",
+            use_container_width=True
+        )
+
+    with btn_col2:
+        reset_btn = st.form_submit_button(
+            "Reset",
+            use_container_width=True,
+            on_click=reset_inputs
+        )
+
+
+# =========================
+# Prediction and SHAP explanation
+# =========================
+if predict_btn:
+
+    # Original dropdown selections: absence / presence
+    input_label_dict = {
+        name: st.session_state[f"input_{name}"]
+        for name in display_order
+    }
+
+    # Numeric values for display order
+    input_numeric_display = {
+        name: OPTION_MAP[st.session_state[f"input_{name}"]]
+        for name in display_order
+    }
+
+    # Numeric values using original model feature names
+    input_numeric_model = {
+        feature_to_model_name[name]: input_numeric_display[name]
+        for name in display_order
+    }
+
+    # X_model must use the exact feature names and order stored in the model
+    X_model = pd.DataFrame(
+        [[input_numeric_model[col] for col in model_feature_names]],
+        columns=model_feature_names
     )
 
-    st.button(
-        "Reset Inputs",
-        on_click=reset_inputs,
-        use_container_width=True
+    # X_display is only for showing clean feature names to users
+    X_label_display = pd.DataFrame(
+        [[input_label_dict[name] for name in display_order]],
+        columns=display_order
     )
 
-with right_col:
+    X_numeric_display = pd.DataFrame(
+        [[input_numeric_display[name] for name in display_order]],
+        columns=display_order
+    )
+
     # =========================
-    # Prediction and SHAP explanation
+    # Model prediction
     # =========================
-    if predict_btn:
+    try:
+        pred_class = clf.predict(X_model)[0]
 
-        # Original dropdown selections: absence / presence, shown to users in SHAP order
-        input_label_dict_display = {
-            name: st.session_state[f"input_{display_to_index[name]}"]
-            for name in display_order
-        }
+        pred_proba = None
+        target_class = None
+        target_index = 0
 
-        # Numeric values by clean display name
-        input_value_dict_display = {
-            name: OPTION_MAP[st.session_state[f"input_{display_to_index[name]}"]]
-            for name in feature_names_display
-        }
+        if hasattr(clf, "predict_proba"):
+            pred_proba_all = clf.predict_proba(X_model)
+            classes = list(clf.classes_)
 
-        # Numeric values passed to the model, with original model feature names preserved
-        input_value_dict_model = {
-            display_to_model[name]: input_value_dict_display[name]
-            for name in feature_names_display
-        }
-
-        X_label = pd.DataFrame([input_label_dict_display], columns=display_order)
-        X = pd.DataFrame([input_value_dict_model], columns=feature_names_model)
-
-        st.subheader("Current Input Data")
-
-        with st.expander("View original input: absence / presence", expanded=False):
-            st.dataframe(X_label, use_container_width=True)
-
-        with st.expander("View model input values: 0 / 1", expanded=False):
-            # Show a clean, readable table while keeping X itself compatible with the model.
-            X_display = pd.DataFrame(
-                [{name: input_value_dict_display[name] for name in display_order}],
-                columns=display_order
-            )
-            st.dataframe(X_display, use_container_width=True)
-
-        try:
-            pred_class = clf.predict(X)[0]
-
-            if hasattr(clf, "predict_proba"):
-                pred_proba_all = clf.predict_proba(X)
-                classes = list(clf.classes_)
-
-                # By default, explain and display the probability of class 1.
-                # If class 1 is not available, use the last class by default.
-                if 1 in classes:
-                    target_class = 1
-                    target_index = classes.index(1)
-                else:
-                    target_class = classes[-1]
-                    target_index = len(classes) - 1
-
-                pred_proba = pred_proba_all[0][target_index]
-
-                # Index corresponding to the predicted class, used as a fallback
-                if pred_class in classes:
-                    pred_index = classes.index(pred_class)
-                else:
-                    pred_index = int(np.argmax(pred_proba_all[0]))
-
+            # Default target: class 1.
+            # If class 1 does not exist, use the last class.
+            if 1 in classes:
+                target_class = 1
+                target_index = classes.index(1)
             else:
-                pred_proba = None
-                target_index = 0
-                pred_index = 0
-                target_class = None
+                target_class = classes[-1]
+                target_index = len(classes) - 1
 
-            st.subheader("Prediction Results")
+            pred_proba = float(pred_proba_all[0][target_index])
 
-            st.success(f"Predicted class: {pred_class}")
+        else:
+            pred_proba_all = None
+            classes = None
 
-            if pred_proba is not None:
-                st.success(f"Prediction probability: {pred_proba * 100:.2f}%")
+    except Exception as e:
+        st.error("Model prediction failed.")
+        st.exception(e)
+        st.stop()
+
+
+    # =========================
+    # Result card
+    # =========================
+    st.markdown(
+        '<div class="result-card">',
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        '<div class="result-title">Prediction Results</div>',
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        f'<div class="result-line">Predicted class: {pred_class}</div>',
+        unsafe_allow_html=True
+    )
+
+    if pred_proba is not None:
+        st.markdown(
+            f'<div class="result-line">Prediction probability for class {target_class}: {pred_proba * 100:.2f}%</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        st.markdown(
+            '<div class="small-note">The current model does not support predict_proba, so prediction probability cannot be displayed.</div>',
+            unsafe_allow_html=True
+        )
+
+    with st.expander("View current input data", expanded=False):
+        st.markdown("Original input: absence / presence")
+        st.dataframe(X_label_display, use_container_width=True)
+
+        st.markdown("Model input values: absence = 0, presence = 1")
+        st.dataframe(X_numeric_display, use_container_width=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+    # =========================
+    # SHAP force plot
+    # =========================
+    st.markdown(
+        '<div class="shap-card">',
+        unsafe_allow_html=True
+    )
+
+    st.markdown(
+        '<div class="section-title">SHAP Force Plot</div>',
+        unsafe_allow_html=True
+    )
+
+    try:
+        explainer = load_explainer(clf)
+        shap_values = explainer(X_model)
+
+        values = shap_values.values
+        base_values = shap_values.base_values
+
+        # Compatible with binary classification, multiclass classification, and different SHAP versions
+        if values.ndim == 3:
+            # shape: [number of samples, number of features, number of classes]
+            shap_value_single = values[0, :, target_index]
+
+            if np.ndim(base_values) == 2:
+                expected_value = base_values[0, target_index]
+            elif np.ndim(base_values) == 1:
+                expected_value = base_values[target_index]
             else:
-                st.info("The current model does not support predict_proba, so prediction probability cannot be displayed.")
+                expected_value = base_values
 
-        except Exception as e:
-            st.error("Model prediction failed.")
-            st.exception(e)
+        elif values.ndim == 2:
+            # shape: [number of samples, number of features]
+            shap_value_single = values[0]
+
+            if np.ndim(base_values) == 1:
+                expected_value = base_values[0]
+            else:
+                expected_value = base_values
+
+        else:
+            st.error(f"Unrecognized SHAP values dimension: {values.shape}")
             st.stop()
 
+        expected_value = float(np.ravel(expected_value)[0])
 
-        # =========================
-        # SHAP force plot
-        # =========================
-        st.subheader("SHAP Force Plot")
+        # Use clean feature names in model original order for the SHAP plot
+        clean_model_order_names = [x.strip() for x in model_feature_names]
+        feature_values_for_plot = np.round(
+            X_model.iloc[0].values.astype(float),
+            3
+        )
 
-        try:
-            explainer = load_explainer(clf)
-            shap_values = explainer(X)
+        plt.close("all")
 
-            values = shap_values.values
-            base_values = shap_values.base_values
+        shap.force_plot(
+            expected_value,
+            np.round(shap_value_single, 3),
+            feature_values_for_plot,
+            feature_names=clean_model_order_names,
+            figsize=(42, 4.2),
+            matplotlib=True,
+            show=False,
+            text_rotation=0,
+            contribution_threshold=0.03
+        )
 
-            # Compatible with binary classification, multiclass classification, and different SHAP versions
-            if values.ndim == 3:
-                # shape: [number of samples, number of features, number of classes]
-                shap_value_single = values[0, :, target_index]
+        fig = plt.gcf()
 
-                if np.ndim(base_values) == 2:
-                    expected_value = base_values[0, target_index]
-                elif np.ndim(base_values) == 1:
-                    expected_value = base_values[target_index]
-                else:
-                    expected_value = base_values
+        svg_buffer = io.StringIO()
+        fig.savefig(
+            svg_buffer,
+            format="svg",
+            bbox_inches="tight"
+        )
+        plt.close(fig)
 
-            elif values.ndim == 2:
-                # shape: [number of samples, number of features]
-                shap_value_single = values[0]
+        svg_data = svg_buffer.getvalue()
+        b64 = base64.b64encode(svg_data.encode("utf-8")).decode("utf-8")
 
-                if np.ndim(base_values) == 1:
-                    expected_value = base_values[0]
-                else:
-                    expected_value = base_values
+        components.html(
+            f"""
+            <div style="
+                width:100%;
+                overflow-x:auto;
+                border:1px solid #eef0f4;
+                border-radius:12px;
+                padding:12px;
+                background:#ffffff;
+            ">
+                <img src="data:image/svg+xml;base64,{b64}"
+                     style="width:100%; min-width:1200px;">
+            </div>
+            """,
+            height=380,
+            scrolling=False
+        )
 
-            else:
-                st.error(f"Unrecognized SHAP values dimension: {values.shape}")
-                st.stop()
+    except Exception as e:
+        st.error("Failed to generate SHAP force plot.")
+        st.exception(e)
 
-            # Ensure expected_value is a scalar
-            expected_value = float(np.ravel(expected_value)[0])
+    st.markdown('</div>', unsafe_allow_html=True)
 
-            # Prevent old figures from remaining
-            plt.close("all")
 
-            # SHAP values follow the model feature order; use clean names for display.
-            shap.force_plot(
-                expected_value,
-                np.round(shap_value_single, 3),
-                np.round(X.iloc[0].values.astype(float), 3),
-                feature_names=feature_names_display,
-                figsize=(45, 4),
-                matplotlib=True,
-                show=False,
-                text_rotation=0,
-                contribution_threshold=0.03
-            )
-
-            fig = plt.gcf()
-
-            # Save as SVG for clearer display on the webpage
-            svg_buffer = io.StringIO()
-            fig.savefig(
-                svg_buffer,
-                format="svg",
-                bbox_inches="tight"
-            )
-            plt.close(fig)
-
-            svg_data = svg_buffer.getvalue()
-            b64 = base64.b64encode(svg_data.encode("utf-8")).decode("utf-8")
-
-            components.html(
-                f"""
-                <div style="width:100%; overflow-x:auto; border:1px solid #e6e6e6; padding:10px;">
-                    <img src="data:image/svg+xml;base64,{b64}" style="width:100%; min-width:1200px;">
-                </div>
-                """,
-                height=360,
-                scrolling=False
-            )
-
-        except Exception as e:
-            st.error("Failed to generate SHAP force plot.")
-            st.exception(e)
+else:
+    st.info("After selecting the genetic variation status, click Predict. The prediction result and SHAP explanation will appear below the input panel.")
