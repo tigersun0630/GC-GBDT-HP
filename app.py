@@ -126,8 +126,7 @@ st.markdown(
 st.markdown(
     """
     <div class="main-title">
-        H. pylori Genetic Variation-Driven Gastric Cancer Risk Prediction:
-        A SHAP-Explained Online Platform
+        HelicoRisk: a SHAP-explained web platform for genomic prediction of H. pylori-associated GC risk
     </div>
     <div class="subtitle">
         Select the absence or presence status of each genetic variation, then click Predict to obtain model-based risk estimation and SHAP explanation.
