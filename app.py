@@ -18,7 +18,7 @@ import streamlit.components.v1 as components
 # Page configuration
 # =========================
 st.set_page_config(
-    page_title="H. pylori Genetic Variation-Driven Gastric Cancer Risk Prediction",
+    page_title="HelicoRisk: a SHAP-explained web platform for genomic prediction of H. pylori-associated GC risk",
     layout="wide"
 )
 
